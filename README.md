@@ -1,12 +1,14 @@
 # pl-sql-BaseX
-PL/SQL client for BaseX.
+PL/SQL client for [BaseX](http://basex.org/).
+It is a work in progress.
+
 # Grants
 grant create procedure to <user>;
 grant create session to <user>;
 
 grant execute on DBMS_CRYPTO to <user>;
 grant execute on UTL_TCP to <user>;
-
+```bash
 begin
   dbms_network_acl_admin.create_acl (
     acl => 'basex_permissions.xml', -- or any other name
@@ -41,3 +43,4 @@ dbms_network_acl_admin.assign_acl (
 );
 end;
 /
+```
