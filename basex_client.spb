@@ -36,23 +36,17 @@ is
   as
     l_dummy pls_integer;
     v_len   pls_integer;
+    buffer varchar2(4000);
+    head   pls_integer := 1;
+    chunk  pls_integer := 4000;
   begin
     v_len := dbms_lob.getLength(p_text);
-    if v_len > 32767 then
-      declare
-        buffer varchar2(4000);
-        head   pls_integer := 1;
-        chunk  pls_integer := 4000;
-      begin
-        while (head < v_len) loop
-          dbms_lob.read(p_text, chunk, head, buffer);
-          l_dummy := utl_tcp.write_text(p_conn, buffer);
-          head := head + chunk;
-        end loop;
-      end;
-    else
-      l_dummy := utl_tcp.write_text(p_conn, p_text);
-    end if;
+    while (head <= v_len) loop
+      dbms_lob.read(p_text, chunk, head, buffer);
+      l_dummy := utl_tcp.write_text(p_conn, buffer);
+      head := head + chunk;
+    end loop;
+    utl_tcp.flush(p_conn);
   end;
   ---------------------------------------------------------------------------
   procedure write_to_wire(p_conn in out nocopy utl_tcp.connection, p_bin blob)
@@ -64,43 +58,44 @@ is
     chunk   pls_integer := 1000;
   begin
     v_len := dbms_lob.getLength(p_bin);
-    while (head < v_len) loop
+    while (head <= v_len) loop
       dbms_lob.read(p_bin, chunk, head, buffer);
       l_dummy := utl_tcp.write_raw(p_conn, buffer);
       head := head + chunk;
     end loop;
+    utl_tcp.flush(p_conn);
   end;
   ---------------------------------------------------------------------------
   function read_string(p_conn in out nocopy utl_tcp.connection) return clob
   as
-    b         varchar2(1);
-    buff      varchar2(32000) := '';
-    clob_buff clob;
-    sz        pls_integer := 0;
+    v_tmp clob;
+    b     varchar2(1);
+    buff  varchar2(32000);
+    sz    pls_integer := 0;
   begin
     -- success?
-    if utl_tcp.get_text(c => p_conn, len => 1, peek => true) = chr(0) then
-      return utl_tcp.get_text(c => p_conn, len => 1, peek => false);
+    b := utl_tcp.get_text(c => p_conn, len => 1, peek => false);
+    if b = chr(0) then
+      return b;
+    else
+      buff := b;
+      sz := 1;
     end if;
+    dbms_lob.createtemporary(v_tmp, true);
     -- wait until data is there, or timeout
-    while (utl_tcp.available(p_conn, 0) > 0 and utl_tcp.get_text(c => p_conn, len => 1, peek => true) != chr(0))
+    while (utl_tcp.available(p_conn) > 0 and utl_tcp.get_text(c => p_conn, len => 1, peek => true) != chr(0))
     loop
       if sz = 32000 then
-        clob_buff := clob_buff || buff;
-        buff      := '';
-        sz        := 0;
+        sz := 0;
+        dbms_lob.append(v_tmp, buff);
+        buff := '';
       end if;
-      buff  := buff || utl_tcp.get_text(p_conn);
-      sz    := sz +1;
+      buff := buff || utl_tcp.get_text(c => p_conn, len => 1, peek => false);
     end loop;
+    dbms_lob.append(v_tmp, buff);
     -- remove the 0 that kicked us out
     b := utl_tcp.get_text(c => p_conn, len => 1, peek => false);
-    -- did we touch the clob?
-    if clob_buff is null then
-      return buff;
-    else
-      return clob_buff;
-    end if;
+    return v_tmp;
   end;
   ---------------------------------------------------------------------------
   function read_binary(p_conn in out nocopy utl_tcp.connection) return blob
@@ -122,13 +117,17 @@ is
   function ok(p_conn in out nocopy utl_tcp.connection) return boolean
   as
   begin
-    return read_string(p_conn) like chr(0);
+    return read_string(p_conn) = chr(0);
   end;
   ---------------------------------------------------------------------------
   procedure send_command(p_conn in out nocopy utl_tcp.connection, code pls_integer, arg varchar2, input clob)
   as
   begin
-    write_to_wire(p_conn, chr(code) || arg || chr(0) || input || chr(0));
+    write_to_wire(p_conn, chr(code));
+    write_to_wire(p_conn, arg);
+    write_to_wire(p_conn, chr(0));
+    write_to_wire(p_conn, input);
+    write_to_wire(p_conn, chr(0));
     g_info  := read_string(p_conn);
     if ok(p_conn) then
       null;
@@ -153,8 +152,13 @@ is
   ---------------------------------------------------------------------------
   procedure send_void_command(p_conn in out nocopy utl_tcp.connection, p_command binary_integer, p_arg clob)
   as
+    v_tmp clob;
   begin
-    write_to_wire(p_conn, chr(p_command) || p_arg || chr(0));
+    dbms_lob.createtemporary(v_tmp, true);
+    dbms_lob.append(v_tmp,chr(p_command));
+    dbms_lob.append(v_tmp,p_arg);
+    dbms_lob.append(v_tmp,chr(0));
+    write_to_wire(p_conn, v_tmp);
   end;
   ---------------------------------------------------------------------------
   -- PUBLIC 
@@ -403,9 +407,20 @@ is
                    p_value              clob, 
                    p_type               varchar2)
   as
+    v_tmp clob;
   begin
+    dbms_lob.createtemporary(v_tmp, true);
+    dbms_lob.append(v_tmp, p_qid);
+    dbms_lob.append(v_tmp, chr(0));
+    dbms_lob.append(v_tmp, p_name);
+    dbms_lob.append(v_tmp, chr(0));
+    dbms_lob.append(v_tmp, p_value);
+    dbms_lob.append(v_tmp, chr(0));
+    if p_type is not null then
+      dbms_lob.append(v_tmp, p_type);
+    end if;
     g_query(p_qid).res_cache.delete;
-    q_exec(p_conn, p_qid, 3, p_qid || chr(0) || p_name || chr(0) || p_value || chr(0) || p_type);
+    q_exec(p_conn, p_qid, 3, v_tmp);
   end;
   ---------------------------------------------------------------------------
   procedure q_context(p_conn in out nocopy utl_tcp.connection, 
@@ -421,9 +436,18 @@ is
                       p_value              clob, 
                       p_type               varchar2)
   as
+    v_tmp clob;
   begin
+    dbms_lob.createtemporary(v_tmp, true);
+    dbms_lob.append(v_tmp, p_qid);
+    dbms_lob.append(v_tmp, chr(0));
+    dbms_lob.append(v_tmp, p_value);
+    dbms_lob.append(v_tmp, chr(0));
+    if p_type is not null then
+      dbms_lob.append(v_tmp, p_type);
+    end if;
     g_query(p_qid).res_cache.delete;
-    q_exec(p_conn, p_qid, 14, p_qid || chr(0) || p_value || chr(0) || p_type);
+    q_exec(p_conn, p_qid, 14, v_tmp);
   end;
   ---------------------------------------------------------------------------
   procedure q_close(p_conn in out nocopy utl_tcp.connection, 
