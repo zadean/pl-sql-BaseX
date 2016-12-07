@@ -46,6 +46,7 @@ is
       l_dummy := utl_tcp.write_text(p_conn, buffer);
       head := head + chunk;
     end loop;
+    l_dummy := utl_tcp.write_line(p_conn);
     utl_tcp.flush(p_conn);
   end;
   ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ is
       l_dummy := utl_tcp.write_raw(p_conn, buffer);
       head := head + chunk;
     end loop;
+    l_dummy := utl_tcp.write_line(p_conn);
     utl_tcp.flush(p_conn);
   end;
   ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ is
     -- success?
     b := utl_tcp.get_text(c => p_conn, len => 1, peek => false);
     if b = chr(0) then
-      return b;
+      return null;
     else
       buff := b;
       sz := 1;
@@ -117,17 +119,16 @@ is
   function ok(p_conn in out nocopy utl_tcp.connection) return boolean
   as
   begin
-    return read_string(p_conn) = chr(0);
+    return read_string(p_conn) is null;
+  exception when others then
+    return false;
   end;
   ---------------------------------------------------------------------------
   procedure send_command(p_conn in out nocopy utl_tcp.connection, code pls_integer, arg varchar2, input clob)
   as
   begin
-    write_to_wire(p_conn, chr(code));
-    write_to_wire(p_conn, arg);
-    write_to_wire(p_conn, chr(0));
+    write_to_wire(p_conn, chr(code) || arg);
     write_to_wire(p_conn, input);
-    write_to_wire(p_conn, chr(0));
     g_info  := read_string(p_conn);
     if ok(p_conn) then
       null;
@@ -139,9 +140,8 @@ is
   procedure send_command(p_conn in out nocopy utl_tcp.connection, code pls_integer, arg varchar2, input blob)
   as
   begin
-    write_to_wire(p_conn, chr(code) || arg || chr(0));
+    write_to_wire(p_conn, chr(code) || arg);
     write_to_wire(p_conn, input);
-    write_to_wire(p_conn, chr(0));
     g_info  := read_string(p_conn);
     if ok(p_conn) then
       null;
@@ -150,14 +150,13 @@ is
     end if;
   end;
   ---------------------------------------------------------------------------
-  procedure send_void_command(p_conn in out nocopy utl_tcp.connection, p_command binary_integer, p_arg clob)
+  procedure send_void_command(p_conn in out nocopy utl_tcp.connection, p_command pls_integer, p_arg clob)
   as
     v_tmp clob;
   begin
     dbms_lob.createtemporary(v_tmp, true);
-    dbms_lob.append(v_tmp,chr(p_command));
-    dbms_lob.append(v_tmp,p_arg);
-    dbms_lob.append(v_tmp,chr(0));
+    dbms_lob.append(v_tmp, chr(p_command));
+    dbms_lob.append(v_tmp, p_arg);
     write_to_wire(p_conn, v_tmp);
   end;
   ---------------------------------------------------------------------------
@@ -172,7 +171,7 @@ is
     pos      binary_integer;
   begin
     -- get the connection
-    v_conn    := utl_tcp.open_connection(remote_host => host, remote_port => port, charset => 'UTF8' ); --  tx_timeout => 1,
+    v_conn    := utl_tcp.open_connection(remote_host => host, remote_port => port, charset => 'UTF8', newline => chr(0), tx_timeout => 1 ); 
     response  := read_string(v_conn);
     pos       := instr(response,':');
     -- digest
@@ -185,7 +184,7 @@ is
       nonce := response;
     end if;
     -- send username and hashed password/timestamp
-    write_to_wire(v_conn, username || chr(0) || md5(md5(code) || nonce) || chr(0));
+    write_to_wire(v_conn, username || chr(0) || md5(md5(code) || nonce));
     -- receive success flag
     if ok(v_conn) then
       return v_conn;
@@ -200,7 +199,7 @@ is
   as
     l_result clob;
   begin
-    write_to_wire(p_conn, com || chr(0));
+    write_to_wire(p_conn, com);
     l_result  := read_string(p_conn);
     g_info := read_string(p_conn);
     if ok(p_conn) then
@@ -217,7 +216,7 @@ is
   as
     l_result blob;
   begin
-    write_to_wire(p_conn, com || chr(0));
+    write_to_wire(p_conn, com);
     l_result  := read_binary(p_conn);
     g_info := read_string(p_conn);
     if ok(p_conn) then
@@ -274,7 +273,7 @@ is
   procedure close_session(p_conn in out nocopy utl_tcp.connection)
   as
   begin
-    write_to_wire(p_conn, 'exit' || chr(0));  
+    write_to_wire(p_conn, 'exit');  
     utl_tcp.close_connection(p_conn);
   end;
   ---------------------------------------------------------------------------
@@ -410,10 +409,8 @@ is
     v_tmp clob;
   begin
     dbms_lob.createtemporary(v_tmp, true);
-    dbms_lob.append(v_tmp, p_qid);
-    dbms_lob.append(v_tmp, chr(0));
-    dbms_lob.append(v_tmp, p_name);
-    dbms_lob.append(v_tmp, chr(0));
+    dbms_lob.append(v_tmp, p_qid || chr(0));
+    dbms_lob.append(v_tmp, p_name || chr(0));
     dbms_lob.append(v_tmp, p_value);
     dbms_lob.append(v_tmp, chr(0));
     if p_type is not null then
@@ -439,8 +436,7 @@ is
     v_tmp clob;
   begin
     dbms_lob.createtemporary(v_tmp, true);
-    dbms_lob.append(v_tmp, p_qid);
-    dbms_lob.append(v_tmp, chr(0));
+    dbms_lob.append(v_tmp, p_qid || chr(0));
     dbms_lob.append(v_tmp, p_value);
     dbms_lob.append(v_tmp, chr(0));
     if p_type is not null then
