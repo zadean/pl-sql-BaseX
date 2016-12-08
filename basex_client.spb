@@ -109,6 +109,7 @@ is
         buff := '';
       end if;
       buff := buff || utl_tcp.get_text(c => p_conn, len => 1, peek => false);
+      sz := sz + 1;
     end loop;
     dbms_lob.append(v_tmp, buff);
     -- remove the 0 that kicked us out
