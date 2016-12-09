@@ -19,8 +19,7 @@ begin
 
   -- drop database
   v_outp := basex_client.bx_execute(v_sess, 'drop db database');
-exception when others then
+
   basex_client.close_session(v_sess);
-  dbms_output.put_line(sqlerrm);
 end;
 /

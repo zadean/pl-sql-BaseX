@@ -40,5 +40,8 @@ begin
 
   -- drop database
   v_outp := basex_client.bx_execute(v_sess, 'drop db database');
+
+  basex_client.close_session(v_sess);
+
 end;
 /

@@ -101,7 +101,7 @@ is
     end if;
     dbms_lob.createtemporary(v_tmp, true);
     -- wait until data is there, or timeout
-    while (utl_tcp.available(p_conn) > 0 and utl_tcp.get_text(c => p_conn, len => 1, peek => true) != C_0)
+    while (utl_tcp.available(p_conn, 1) > 0 and utl_tcp.get_text(c => p_conn, len => 1, peek => true) != C_0)
     loop
       if sz = 32000 then
         sz := 0;
